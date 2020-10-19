@@ -1,0 +1,10 @@
+column,name,type,description,source (if not provided by challenge)
+A,season,date,dengue season,
+B,season_week,date,week of spring-spring season,
+C,week,date,week of calendar year,
+D,week_start_date,date,date of start of week,
+E,year,date,year for combining datasets,
+F,cases,response,dengue response data (new cases per week),
+G,prec,predictor,total weekly precipitation in mm (reanalysis data),
+H,tavg,predictor,average weekly temp in K (reanalysis data),
+I,mu,predictor,susceptibles index (also denoted by lambda),

@@ -1,0 +1,670 @@
+---
+title: "Scenario Exploration (Figures 5 and 6)"   
+author:  | 
+  | Nicole Nova, Ethan R. Deyle, Marta S. Shocket, Andrew J. MacDonald, Marissa L. Childs, Martin Rypdal, George Sugihara, and Erin A. Mordecai
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+## Scenario Exploration (Figures 5 and 6)
+
+CCM results suggest that temperature and rainfall drive quasi-seasonal dengue outbreaks. The goal of this analysis with scenario exploration is to verify and illustrate that these drivers have a state dependent effect.
+
+If necessary, we can clear the environment to start with a clean workspace.
+```{r}
+rm(list=ls())
+```
+
+Help functions.
+```{r}
+source("scenario_exp_functions.R")
+```
+
+Here, we can load previous results.
+```{r}
+#load(file="../cache/Figure_5-6.RData") 
+```
+
+
+### Data
+
+```{r Load data}
+# We load the data and create our main dataframe PR, which stands for "Puerto Rico."
+PR <- read.csv("../data/combined_SanJuan_PuertoRico_1990-2009.csv", header = T) %>%
+  rename(temp = tavg) %>%
+  mutate(time = as.Date(as.character(levels(week_start_date)), 
+                     format = "%m/%d/%Y")[week_start_date]) %>%
+  select(time, -season, -season_week, -week_start_date, -year, everything())
+
+# Per other analyses, we remove an anomolous precipitation measurement
+prec_max_value <- which.max(PR$prec) # Find the extreme outlier value
+PR$prec[prec_max_value] <- 0 # Remove it
+PR$prec[prec_max_value] <- max(PR$prec) # Replace it with the next highest value
+```
+
+
+### State Space Reconstruction
+
+```{r Set general parameters}
+temp_color <- "red"
+prec_color <- "blue"
+mu_color <- "purple"
+
+use_median <- T
+```
+
+#### Multivariate EDM Validation
+
+Univariate SSR analysis of dengue incidence time series reveals a large optimal E (Figure S3). Many lagged time series (as dimensions) of incidence are needed to unfold the attractor dynamics. This is not ideal for scenario exploration or s-map analysis as the more lag coordinates used as proxy variables, the more opaque the meaning of the scenario exploration analysis. However, dengue incidence data show considerable autocorrelation, and therefore it is likely that a much smaller embedding dimension is necessary if a larger "tau" is used, i.e., if lags are taken further apart to minimize their similarity.
+
+To pick a larger tau, we run ACF on dengue cases and find the first lag tau where cor(x(t), x(t-tau)) ~ exp(-1/2) ~ 0.6.
+```{r}
+which.min(abs(acf(PR$cases)$acf[-1] - exp(-1/2))) 
+```
+
+Thus for the multivariate analysis, we use tau = tp = 7 weeks. Additionally, we wish to use (biological) time lags previously hypothesized/inferred to have the most direct effect on dengue incidence: the weekly temperature 9 weeks ago and the average precipitation between 3 and 9 weeks ago. Note that we want this lag to be from the time point we are trying to predict (time = t + tp), thus we  will subtract these lags from "tp" to get the right lag relationships in our rEDM input block.
+
+Given that we are using a tau > 1, it is also important to be more conservative with the cross-validation scheme. By default, rEDM will only exclude the target vector from the library: leave-one-out cross-validation. However, with a highly autocorrelated time series, this is not really sufficient, since it still permits selecting neighbors right next to the target in time, when the values are very similar (due to autocorrelation). At a minimum, one should exclude all vectors within "tau" time-points of the target. Here, we go one step further and set an exclusion radius of 1/2 year (26 weeks). This way, points within the same outbreak cannot be used to predict one-another. In essence, it is leave-one-outbreak-out cross-validation.
+```{r EDM parameters}
+# Parameters for attractor reconstruction
+tp <- 7
+tau <- 7
+E.max <- 10
+excl_radius_weeks <- 26
+excl_radius_days <- 26*7
+
+# Biological lags
+lag.temp <- tp - 9
+prec_avg_over <- 7 # avg of 3-9 previous weeks (7 week interval)
+lag.prec <- tp - 3 # lag from the most recent week averaged
+```
+
+Univariate SSR for incidence using simplex projection and an autoregressive model: two ways to forecast dengue dynamics. 
+```{r}
+out.simplex <- simplex((PR$cases), tau = tau, E = 1:E.max, tp = 1:75, exclusion_radius = excl_radius_weeks)
+
+out.simplex.maxes <- out.simplex %>%
+  group_by(tp) %>%
+  top_n(1, rho)
+
+ggplot(out.simplex.maxes, aes(x = tp)) + 
+  geom_line(aes(y = rho, color = "simplex")) + 
+  geom_line(aes(y = const_pred_rho, color="AR(1)")) +
+  theme_bw()
+
+ggplot(out.simplex.maxes, aes(x = tp)) + 
+  geom_line(aes(y = mae, color = "simplex")) + 
+  geom_line(aes(y = const_pred_mae, color="AR(1)")) +
+  scale_y_reverse() +
+  theme_bw()
+```
+
+Doing straight simplex projection it is easiest to see significant nonlinear forecasting skill at longer time intervals (> 7 weeks). For very short prediction time, the autocorrelation of the time series gives as good prediction skill as simplex (the autoregressive model AR(1), so-called "constant predictor" that x(t+tp) = x(t)). This shows that even with a larger tau we are able to capture dengue dynamics and predict cases.
+
+Next, we will build multivariate SSR attractors (blocks). Due to the lag specifications, we need to custom-build the attractor. Note that we wait until the last step to normalize the attractor, and do so via saving the coefficients of normalization (standard deviation and mean).
+```{r Make block}
+block.dengue_raw <- make_block(data = PR,
+                          cols = c( rep('cases', E.max+1), 'temp', 'prec', 'mu'),
+                          delays = c( 0, seq(0, by = -tau, length.out = E.max),
+                                    -lag.temp, -lag.prec, 0),
+                          diff_col = c(TRUE, rep(FALSE, E.max + 3)))
+
+block.dengue_raw <- block.dengue_raw[,-1]
+
+case_cols <- (grep("^cases", names(block.dengue_raw), value = TRUE))
+temp_col <- (grep("^temp", names(block.dengue_raw), value = TRUE))
+prec_col <- (grep("^prec", names(block.dengue_raw), value = TRUE))
+mu_col <- (grep("^mu", names(block.dengue_raw), value = TRUE))
+
+block.dengue_raw <- block.dengue_raw %>%
+  mutate(time = as.numeric(PR$time)) %>%
+  mutate(!! quo_name(prec_col)  := zoo::rollapply(data = (!! sym(prec_col)),
+                                     width = prec_avg_over,
+                                     FUN = mean,
+                                     align = "right",
+                                     fill = NA,
+                                     na.rm = T)) %>%
+    mutate(cases_yr_t  = zoo::rollapply(data = (cases_t),
+                                     width = 52,
+                                     FUN = sum,
+                                     align = "right",
+                                     fill = NA,
+                                     na.rm = T)) %>%
+  select(time, everything()) %>%
+  filter(complete.cases(.))
+
+coeff_block.dengue <- list(v_mean = map(block.dengue_raw, mean),
+                           v_sd = map(block.dengue_raw, sd))
+
+# Normalise the block dimensions (and keep the means and sds saved)
+block.dengue <- purrr::pmap_dfc(c(list(v = block.dengue_raw), coeff_block.dengue), norm_coeff) %>%
+  mutate(time = block.dengue_raw$time)
+```
+
+To construct and validate the multivariate EDM model, we first compute optimal number of lags of cases when including temp and prec.
+```{r}
+# Construct a list of different embeddings with increasing numbers of lags of cases
+L.embeddings <- lapply(0:E.max, function(E){
+  c(case_cols[seq(1, by = 1, length.out = E)], prec_col, temp_col)
+})
+
+# Run block_lnlp for each set of embedding columns
+results.mEDM_var_E <- block_lnlp(
+  block = block.dengue %>% as.data.frame(),
+  method = "simplex",
+  tp = tp,
+  num_neighbors = 'e+1',
+  target_column = 'cases_t',
+  columns = L.embeddings,
+  exclusion_radius = excl_radius_days,
+  first_column_time = TRUE
+) %>%
+  mutate(lags_total_cases = str_count(embedding,',') - 1)
+
+results.mEDM_var_E %>%
+  ggplot(aes(x = lags_total_cases, y = rho)) + 
+  geom_line() + 
+  labs(title = "lags of cases with temp and prec")
+```
+
+Based on the plot it seems reasonable to chose 2 or 7 lags of cases. We can also compare to the best embedding that includes the two drivers and susceptibles index (mu).
+```{r}
+L.embeddings <- lapply(0:E.max, function(E){
+  c(case_cols[seq(1, by = 1, length.out = E)], prec_col, temp_col, mu_col)
+})
+
+results.mEDM_var_E <- block_lnlp(
+  block = block.dengue %>% as.data.frame(),
+  num_neighbors = 'e+1',
+  method = "simplex",
+  tp = tp,
+  target_column = 'cases_t',
+  columns = L.embeddings,
+  exclusion_radius = excl_radius_days,
+  first_column_time = TRUE
+) %>%
+  mutate(lags_total_cases = str_count(embedding,',') - 2)
+
+results.mEDM_var_E %>%
+  ggplot(aes(x=lags_total_cases,y=rho)) + 
+  geom_line() + 
+  labs(title = "lags of cases with temp, prec, mu")
+```
+
+We should go with 7 lags of cases. Finally, we can look across lags of cases_t when we include the yearly sum of cases.
+```{r}
+L.embeddings <- lapply(0:E.max, function(E){
+  c(case_cols[seq(1, by = 1, length.out = E)], prec_col, temp_col, mu_col, 'cases_yr_t')
+})
+
+results.mEDM_var_E <- block_lnlp(
+  block = block.dengue %>% as.data.frame(),
+  num_neighbors = 'e+1',
+  method = "simplex",
+  tp = tp,
+  target_column = 'cases_t',
+  columns = L.embeddings,
+  exclusion_radius = excl_radius_days,
+  first_column_time = TRUE
+) %>%
+  mutate(lags_total_cases = str_count(embedding,',') - 3)
+
+results.mEDM_var_E.fix_nn <- block_lnlp(
+  block = block.dengue %>% as.data.frame(),
+  num_neighbors = 15,
+  method = "simplex",
+  tp = tp,
+  target_column = 'cases_t',
+  columns = L.embeddings,
+  exclusion_radius = excl_radius_days,
+  first_column_time = TRUE
+) %>%
+  mutate(lags_total_cases = str_count(embedding,',') - 3)
+
+
+results.mEDM_var_E %>%
+  ggplot(aes(x = lags_total_cases, y = rho)) +
+  geom_line(aes(color = "e+1")) +
+  geom_line(data = results.mEDM_var_E.fix_nn, aes(color = "fixed nn")) +
+  labs(title = "lags of cases with temp, prec, mu, cases_yr")
+
+results.mEDM_var_E %>%
+  ggplot(aes(x = lags_total_cases, y = mae)) +
+  geom_line(aes(color = "e+1")) +
+  geom_line(data = results.mEDM_var_E.fix_nn, aes(color = "fixed nn")) +
+  labs(title = "lags of cases with temp, prec, mu, cases_yr")
+
+results.mEDM_var_E %>%
+  ggplot(aes(x = lags_total_cases, y = rmse)) +
+  geom_line(aes(color = "e+1")) +
+  geom_line(data = results.mEDM_var_E.fix_nn, aes(color = "fixed nn")) +
+  labs(title = "lags of cases with temp, prec, mu, cases_yr")
+```
+
+Again, points to 2 or 7 lags of cases. 
+
+Next, we vary the number of lags of weekly cases used to fill out the embedding when temperature, precipitation, mu, and cases over the past year are used. The result is a bit ambiguous when using the standard choice of "e+1" neighbors. There is a peak in prediction skill at 2 lags, but a larger peak also at 7. However, simplex results can be influenced by the scaling of "nn" (number of neighbors) with E, so we take a second look, fixing nn at E.max+1 = 15. Eliminating the scaling of nn with E, 2 lags is a clear reasonable choice.
+
+Then we compared this best embedding to the same embedding without 'temp', without 'prec', and without 'temp' or 'prec'.
+```{r}
+other_col <- c(prec_col, temp_col, mu_col, 'cases_yr_t')
+
+L.embeddings <- lapply(0:E.max, function(E){
+  c(case_cols[seq(1, by = 1, length.out = E)], other_col)
+})
+
+results.mEDM_var_E <- block_lnlp(
+  block = block.dengue %>% as.data.frame(),
+  num_neighbors = 'e+1',
+  method = "simplex",
+  tp = tp,
+  target_column = 'cases_t',
+  columns = L.embeddings,
+  exclusion_radius = excl_radius_days,
+  first_column_time = TRUE
+)
+
+embed.best_mEDM <- L.embeddings[[3]]
+
+L.embed_compare <- list(
+  mEDM_full = embed.best_mEDM,
+  mEDM_no_yr = embed.best_mEDM[!startsWith(embed.best_mEDM, 'cases_yr')],
+  mEDM_no_prec = embed.best_mEDM[!startsWith(embed.best_mEDM, 'prec')],
+  mEDM_no_temp = embed.best_mEDM[!startsWith(embed.best_mEDM, 'temp')],
+  mEDM_no_mu = embed.best_mEDM[!startsWith(embed.best_mEDM, 'mu')],
+  uni = embed.best_mEDM[startsWith(embed.best_mEDM, 'cases_t')])
+```
+
+Now we run these embeddings.
+```{r}
+theta_list <- c(0, 1e-04, 3e-04, 0.001, 0.003, 0.01, 0.03, 
+                0.1, 0.3, 0.5,0.75, 1, 1.5, 2, 3, 4, 6, 8)
+
+results.mEDM_compare <-  map_df(theta_list, function(theta_i) {
+  out_temp <- block_lnlp(
+    block = block.dengue %>% as.data.frame(),
+    method = "s-map",
+    tp = tp,
+    theta = theta_i,
+    target_column = 'cases_t',
+    columns = L.embed_compare,
+    exclusion_radius = excl_radius_days,
+    num_neighbors = 0,
+    first_column_time = TRUE
+  )
+  
+  out_temp$embedding <- names(L.embed_compare)
+  
+  return(out_temp)
+})
+
+results.mEDM_compare %>% 
+  group_by(embedding) %>%
+  top_n(1, rho) %>%
+  print()
+
+L_theta_star_embeds <- results.mEDM_compare %>% 
+  group_by(embedding) %>%
+  top_n(1, rho) %>% 
+  { set_names(pull(., theta), pull(., embedding) %>% as.vector()) }
+  
+results.mEDM_compare %>% 
+  ggplot(aes(x = theta, y = rho, color = embedding)) + geom_line()
+```
+
+There is not much evidence to support including mu as a predictor variable when looking at ~2 month prediction times. This may be because mu predicts the size but not timing of outbreaks.
+
+
+#### Scenario Exploration
+
+We will do all scenario exploration with the same embedding as constructed above. S-map analysis of the possible embeddings showed that including 'mu' as a variable led to a decrease in forecast skill. Thus we use the 'mEDM_no_mu' model, which has columns <"cases_t", "cases_t-7","prec_t-4","temp_t+2","cases_yr_t">.
+
+```{r}
+embed_SE <- 'mEDM_no_mu'
+```
+
+For all scenario exploration, we predict using s-map with theta determined above to maximize cross-validated forecast skill (measured by Pearson's rho). Tau and tp are as before (7 weeks), and we set exclusion radius to 1/2 a year to eliminate the use of nearby time-points in the same outbreak.
+
+```{r}
+block.dengue.SE <- block.dengue[ , c("time", L.embed_compare[[embed_SE]]) ] %>%
+  mutate(d_cases = c(NA, diff(cases_t))) %>%
+  select(time, d_cases, everything())
+
+embedding <- names(block.dengue.SE)[-(1:2)]
+```
+
+```{r}
+results.SE.temp <- scenario_exploration(
+  block.dengue.SE %>% as.data.frame(),
+  method = 's-map',
+  num_neighbors = 0,
+  theta = L_theta_star_embeds[embed_SE],
+  target_column = 'cases_t',
+  explore_column = grep("^temp", embed.best_mEDM, value = TRUE),
+  delta = 0.05,
+  tp = tp,
+  first_column_time = TRUE,
+  exclusion_radius = excl_radius_days
+)
+
+results.SE.prec <- scenario_exploration(
+  block.dengue.SE %>% as.data.frame(),
+  method = 's-map',
+  num_neighbors = 0,
+  theta = L_theta_star_embeds[embed_SE],
+  target_column = 'cases_t',
+  explore_column = grep("^prec", embed.best_mEDM, value = TRUE),
+  delta = 0.05,
+  exclusion_radius = excl_radius_days,
+  tp = tp,
+  first_column_time = TRUE
+)
+
+df.plot_SE <- bind_rows(
+  results.SE.temp %>% mutate(Driver = 'Temp'),
+  results.SE.prec %>% mutate(Driver = 'Rain')
+)
+```
+
+```{r}
+# Use only for the normalized values
+# df.plot_SE %>%
+# ggplot(aes(x = Driver, y = delta)) + geom_boxplot() + 
+#   labs(y = expression(Delta*"Cases(t+7 wks)"/Delta*"Driver(t - lag)")) + theme_bw()
+```
+
+Wilcox with normalized values.  We get 0.0034 for temp and 0.0020 for rain.
+```{r}
+# bind_rows( 
+#   df.plot_SE %>%
+#   group_by(Driver) %>%
+#   filter(Driver == "Temp") %>%
+#   #mutate(delta = trans_dCdT$transform(delta)) %>%
+#   summarise(median = median(delta, na.rm = T),
+#             mean = mean(delta, na.rm = T),
+#             p_val_wilcox = wilcox.test(delta)$p.value,
+#             p_val_ttest = t.test(delta)$p.value),
+#   df.plot_SE %>%
+#   group_by(Driver) %>%
+#   filter(Driver == "Rain") %>%
+#   #mutate(delta = trans_dCdR$transform(delta)) %>%
+#   summarise(median = median(delta, na.rm = T),
+#             mean = mean(delta, na.rm = T),
+#             p_val_wilcox = wilcox.test(delta)$p.value,
+#             p_val_ttest = t.test(delta)$p.value)
+# )
+```
+
+```{r}
+# Define transformations that go from normalized responses (dCases/dEnv) to ratio of original units
+# Multiply by cases_sd/driver_sd
+
+trans_dCdR <- scales::trans_new("dCdR", 
+                                transform = function(x) {
+                                  x*(coeff_block.dengue$v_sd$cases_t/coeff_block.dengue$v_sd$`prec_t-4`)
+                                },
+                                inverse = function(x) {
+                                  x*(coeff_block.dengue$v_sd$`prec_t-4`/coeff_block.dengue$v_sd$cases_t)
+                                })
+
+trans_dCdT <- scales::trans_new("dCdT",
+                                transform = function(x) {
+                                  x*(coeff_block.dengue$v_sd$cases_t/coeff_block.dengue$v_sd$`temp_t+2`)
+                                },
+                                inverse = function(x) {
+                                  x*coeff_block.dengue$v_sd$`temp_t+2`/coeff_block.dengue$v_sd$cases_t
+                                })
+```
+
+Wilcox test results with denormalized values (with actual units).
+```{r}
+bind_rows( 
+  df.plot_SE %>%
+  group_by(Driver) %>%
+  filter(Driver == "Temp") %>%
+  mutate(delta = trans_dCdT$transform(delta)) %>%
+  summarise(median = median(delta, na.rm = T),
+            mean = mean(delta, na.rm = T),
+            p_val_wilcox = wilcox.test(delta)$p.value,
+            p_val_ttest = t.test(delta)$p.value),
+  df.plot_SE %>%
+  group_by(Driver) %>%
+  filter(Driver == "Rain") %>%
+  mutate(delta = trans_dCdR$transform(delta)) %>%
+  summarise(median = median(delta, na.rm = T),
+            mean = mean(delta, na.rm = T),
+            p_val_wilcox = wilcox.test(delta)$p.value,
+            p_val_ttest = t.test(delta)$p.value)
+)
+```
+
+Seems like the median changes are 2.88 cases/C and -0.12 cases/mm rain.
+
+```{r}
+labs_dCdR <- "\u0394Cases(t+7)/\u0394Rain(t+7–lag)\n(cases/mm)"
+labs_dCdT <- "\u0394Cases(t+7)/\u0394Temp(t+7–lag)\n(cases/ºC)"
+
+# Create Figure 5a
+g.SE_boxes <- df.plot_SE %>%
+  mutate(Driver = factor(Driver, levels = c("Temp", "Rain"))) %>%
+  ggplot(aes(x = Driver, y = trans_dCdT$transform(delta), color = Driver)) +
+  geom_boxplot() + 
+  geom_hline(aes(yintercept = 0), lwd = 0.5) + 
+  labs(y = labs_dCdT) +
+  theme_bw() +
+  scale_y_continuous(
+    sec.axis = sec_axis(
+      trans = (~ trans_dCdR$transform(trans_dCdT$inverse(.))),
+      name = labs_dCdR
+    )) +
+  scale_color_manual(values = c("Temp" = temp_color, "Rain" = prec_color)) +
+  theme(axis.line.y.right = element_line(color = prec_color), 
+       axis.ticks.y.right = element_line(color = prec_color),
+       axis.text.y.right = element_text(color = prec_color),
+       axis.title.y.right = element_text(color = prec_color),
+       axis.line.y.left = element_line(color = temp_color), 
+       axis.ticks.y.left = element_line(color = temp_color),
+       axis.text.y.left = element_text(color = temp_color),
+       axis.title.y.left = element_text(color = temp_color)) +
+  theme(legend.position = "none")
+
+g.SE_boxes
+
+ggsave("../output/fig_5/Figure_5a.pdf", g.SE_boxes, device = cairo_pdf, width = 3, height = 3)
+```
+
+In the simple summary provided through box-plots, we see both drivers usually do not have a large effect on future dengue cases. Temperature has a small but perceptible positive median effect. In certain times, rainfall has a large negative effect on future dengue cases, and temperature can have a large positive or negative effect. These results are consistent with our expectation that the effect of environmental drivers are highly state-dependent. We can take a deeper look into the mechanisms of this state-dependence by looking at how the effect of each driver changes with the different state variables.
+```{r}
+mu_star = 0.85  # Based on later results to be the threshold for observing climate effects on dengue
+```
+
+We generate plots that explore state-dependence of the temperature effect.
+```{r}
+y_label <- labs_dCdT
+
+plot.SE.temp <- PR %>%
+  mutate(time = as.numeric(time)) %>%
+  select(time, cases, prec, temp, mu) %>%
+  inner_join(results.SE.temp, by = "time") %>%
+  mutate(delta = trans_dCdT$transform(delta))
+
+g.temp_v_temp <- plot.SE.temp %>%
+  ggplot(aes(x = temp - 273.15, y = delta)) + 
+  geom_point(shape = 3, color = "grey40", alpha = 0.5) +
+  geom_quantile(color = temp_color, quantiles = c(0.05, 0.95), lty = 2) +
+  {if(use_median) geom_quantile(color = temp_color, quantiles = c(0.5), lty = 1, lwd = 1.)} +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 0.5) +
+  labs(y = y_label, x = "Temp (ºC)") +
+  theme_bw() +
+  theme(legend.position = "none")
+g.temp_v_temp
+
+g.temp_v_prec <- plot.SE.temp %>%
+  ggplot(aes(x = prec, y = delta)) + 
+  geom_point(shape = 3,color = "grey40", alpha = 0.5) +
+  geom_quantile(color = temp_color, quantiles = c(0.05, 0.95), lty = 2) +
+  {if(use_median) geom_quantile(color = temp_color, quantiles = c(0.5), lty = 1, lwd = 1.)} +
+  geom_abline(slope = 0, intercept = 0, color='black', lwd = 0.5) +
+  labs(y = y_label, x = "Rain (mm)") +
+  theme_bw() +
+  theme(legend.position = "none")
+g.temp_v_prec
+
+g.temp_v_cases <- plot.SE.temp %>%
+  ggplot(aes(x = cases, y = delta)) +
+  geom_point(shape = 3, color = "grey40", alpha = 0.5) +
+  geom_quantile(color = temp_color, quantiles = c(0.05, 0.95), lty = 2) +
+  {if(use_median) geom_quantile(color = temp_color, quantiles = c(0.5), lty = 1, lwd = 1.)} +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 0.5) +
+  labs(y = y_label) +
+  theme_bw() +
+  theme(legend.position = "none")
+g.temp_v_cases
+
+g.temp_v_mu <- plot.SE.temp %>%
+  ggplot(aes(x = mu, y = delta)) +
+  geom_point(shape = 3, color = "grey40", alpha = 0.5) +
+  geom_quantile(color = temp_color, quantiles = c(0.05, 0.95), lty = 2) +
+  {if(use_median) geom_quantile(color = temp_color, quantiles = c(0.5), lty = 1, lwd = 1.)} +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 0.5) +
+  geom_vline(xintercept = mu_star, color = mu_color, lty = 5) +
+  labs(y = y_label, x = expression("Susceptibles Index "(lambda))) +
+  theme_bw() +
+  theme(legend.position = "none")
+g.temp_v_mu
+
+# Split temp dependence into two panels, split quantile regression at Temp = 26
+g.temp_split_mu <- plot.SE.temp %>%
+  mutate(mu_thresh = ifelse(mu > mu_star, paste(">", mu_star), paste("<", mu_star))) %>%
+  mutate(temp_thresh = temp - 273.15 > 26) %>%
+  group_by(temp_thresh) %>%
+  ggplot(aes(x = temp - 273.15, y = delta)) + 
+  geom_point(shape = 3, color = "grey40", alpha = 0.5) +
+  geom_quantile(aes(color = temp_thresh), quantiles = c(0.05, 0.95), lty = 2) +
+  {if(use_median) geom_quantile(aes(color = temp_thresh), quantiles = c(0.5), lty = 1, lwd = 1.)} +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 0.5) +
+  scale_color_manual(values = c("red", "red")) +
+  labs(y = y_label, x = "Temp (ºC)") +
+  facet_wrap(~mu_thresh, labeller = label_bquote(lambda~.(mu_thresh))) +
+  theme_bw() +
+  theme(legend.position = "none")
+g.temp_split_mu
+```
+
+The effect of temperature looks complicated. Temperature often has no effect on cases, but can have a large positive or large negative effect. This suggests state-depedence, multiple mechanisms, or both. Looking at the the effect as a function of embedding variables, a bit of clarity emerges. Temperature only has a large effect (+ or -) when mu indicates the system is primed for an outbreak (mu > 0.85). Furthermore, temperature only has a large negative effect at very large values. Previous work identified peak conditions at either 26ºC or 29ºC depending on which mosquito species was present (Ae. albopictus and Ae. aegypti, respectively). 
+
+Next, we explore state dependence of rainfall effects.
+```{r}
+y_label <- labs_dCdR
+
+plot.SE.prec <- PR %>%
+  mutate(time = as.numeric(time)) %>%
+  select(time, cases, prec, temp, mu) %>%
+  inner_join(results.SE.prec, by = "time") %>%
+  mutate(delta = trans_dCdR$transform(delta))
+
+g.prec_v_prec <- plot.SE.prec %>%
+  ggplot(aes(x = prec, y = delta)) + 
+  geom_point(shape = 3, color = "grey40", alpha = 0.5) +
+  geom_quantile(color = prec_color, quantiles = c(0.05, 0.95), lty = 2) +
+  {if(use_median) geom_quantile(color = prec_color, quantiles = c(0.5), lty = 1, lwd = 1.)} +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 0.5) +
+  labs(y = y_label, x = "Rain (mm)") +
+  theme_bw() +
+  theme(legend.position = "none")
+g.prec_v_prec
+
+g.prec_v_temp <- plot.SE.prec %>%
+  ggplot(aes(x = temp - 273.15, y = delta)) +
+  geom_point(shape = 3, color = "grey40", alpha = 0.5) +
+  geom_quantile(color = prec_color, quantiles = c(0.05, 0.95), lty = 2) +
+  {if(use_median) geom_quantile(color = prec_color, quantiles = c(0.5), lty = 1, lwd = 1.)} +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 0.5) +
+  labs(y = y_label, x = "Temp (ºC)") +
+  theme_bw() +
+  theme(legend.position = "none")
+g.prec_v_temp
+
+g.prec_v_cases <- plot.SE.prec %>%
+  ggplot(aes(x = cases, y = delta)) + 
+  geom_point(shape = 3, color = "grey40", alpha = 0.5) +
+  geom_quantile(color = prec_color, quantiles = c(0.05, 0.95), lty = 2) +
+  {if(use_median) geom_quantile(color = prec_color, quantiles = c(0.5), lty = 1, lwd = 1.)} +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 0.5) +
+  labs(y = y_label, x = "Dengue Cases(t)") +
+  theme_bw() +
+  theme(legend.position = "none")
+g.prec_v_cases
+
+g.prec_v_mu <- plot.SE.prec %>%
+  ggplot(aes(x = mu, y = delta)) + 
+  geom_point(shape = 3, color = "grey40", alpha = 0.5) +
+  geom_quantile(color = prec_color, quantiles = c(0.05, 0.95), lty = 2) +
+  {if(use_median) geom_quantile(color=prec_color, quantiles = c(0.5), lty = 1, lwd = 1.)} +
+  geom_vline(xintercept = mu_star, color = mu_color, lty = 5) +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 0.5) +
+  labs(y = y_label, x = expression("Susceptibles Index "(lambda))) +
+  theme_bw() +
+  theme(legend.position = "none")
+g.prec_v_mu
+
+g.prec_split_mu <- plot.SE.prec %>%
+  mutate(mu_thresh = ifelse(mu > mu_star, paste(">", mu_star), paste("<", mu_star))) %>%
+  ggplot(aes(x = prec, y = delta)) + 
+  geom_point(shape = 3, color = "grey40", alpha = 0.5) +
+  geom_quantile(color = prec_color, quantiles = c(0.05, 0.95), lty = 2) +
+  {if(use_median) geom_quantile(color = prec_color, quantiles = c(0.5), lty = 1, lwd = 1.)} +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd =0.5) +
+  labs(y = y_label, x ="Rain (mm)") +
+  facet_wrap(~mu_thresh, labeller = label_bquote(lambda~.(mu_thresh))) +
+  theme_bw() +
+  theme(legend.position = "none")
+g.prec_split_mu
+```
+
+Large amounts of rainfall show a clear negative effect on dengue cases. Additionally, this effect is only visible when the system is primed for an outbreak (mu > 0.85), and when temperature is near the optimal range previously identified.
+
+### Figure 5
+
+```{r Figure 5}
+if(use_median){
+  fpath="../output/fig_5/Figure_5.pdf"
+}else{
+  fpath="../output/fig_5/Figure_5_no_median.pdf"
+}
+
+cairo_pdf(file = fpath, width = 8, height = 3)
+grid.arrange(g.SE_boxes, g.temp_v_temp, g.prec_v_prec, nrow = 1)
+dev.off()
+```
+
+
+### Figure 6
+
+```{r Figure 6}
+if(use_median){
+  fpath="../output/fig_6/Figure_6.pdf"
+}else{
+  fpath="../output/fig_6/Figure_6_no_median.pdf"
+}
+
+fg1_1 <- g.temp_v_mu %>% ggplotGrob()
+fg1_2 <- g.prec_v_mu %>% ggplotGrob()
+
+cg1 <- cowplot::plot_grid(fg1_1, fg1_2)
+cg2 <- {g.temp_split_mu + theme(axis.title.y = element_text(vjust = 1))} %>% ggplotGrob()
+cg3 <- {g.prec_split_mu  + theme(axis.title.y = element_text(vjust = 1))} %>% ggplotGrob()
+
+cg23 <- cowplot::plot_grid(cg2, cg3, ncol = 1, align = "v")
+
+cowplot::plot_grid(cg1, cg23, ncol = 1, rel_heights = c(1,2))
+
+cairo_pdf(file = fpath, width = 5, height = 7.6)
+cowplot::plot_grid(cg1, cg23, ncol = 1, rel_heights = c(1,2))
+dev.off()
+```
+
+Here, we can save our progress.
+```{r}
+save.image(file="../cache/Figure_5-6.RData") 
+```

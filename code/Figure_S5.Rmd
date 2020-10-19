@@ -1,0 +1,115 @@
+---
+title: "Evidence of Nonlinear Dynamics (Figure S5)"   
+author:  | 
+  | Nicole Nova, Ethan R. Deyle, Marta S. Shocket, Andrew J. MacDonald, Marissa L. Childs, Martin Rypdal, George Sugihara, and Erin A. Mordecai
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+## Evidence of Nonlinear Dynamics (Figure S5)
+
+If necessary, we can clear the environment to start with a clean workspace.
+```{r}
+rm(list=ls())
+```
+
+Help functions.
+```{r}
+source("data_formatting.R")
+```
+
+Here, we can load previous results.
+```{r}
+#load(file="../cache/Figure_S5.RData") 
+```
+
+
+### Data
+
+We load and process the data and create our main dataframe PR, which stands for "Puerto Rico."
+```{r}
+PR <- data.clean("combined_SanJuan_PuertoRico_1990-2009")
+```
+
+Add lagged and averaged lagged variables.
+```{r}
+PR <- data.process(PR)
+```
+
+Normalize the variables before performing EDM analyses.
+```{r}
+# Normalize the whole dataset
+PR.norm <- scale(PR[,c(-1,-2)], center = TRUE, scale = TRUE)
+
+# Convert back to dataframe
+PR.norm <- as.data.frame(PR.norm)
+
+# Add the date back
+PR.norm <- cbind(PR[1], PR[2], PR.norm)
+
+# Renaming PR to PR.norm since that's what we'll be using in the next EDM analyses
+PR.orig <- PR
+PR <- PR.norm
+```
+
+Only use the four variables.
+```{r}
+PR <- PR[,3:6]
+```
+
+
+### S-map
+
+Here we are distinguishing nonlinear dynamical systems from linear stochastic systems and quantifying the nonlinearity. We will use the S-map method to find the value of theta for each variable. We will use the optimal embedding dimensions found from the simplex projection analysis in the previous section.
+```{r}
+em <- c(8,8,6,5) # Optimal embedding dimensions from previous analyses
+
+E_cases <- 8
+E_temp <- 8
+E_prec <- 6
+E_mu <- 5
+```
+
+```{r}
+# S-map
+smap.list <- list()
+for (i in 1:length(PR)) {
+  (sm <- s_map(PR[[i]], E = get(paste("E_", names(PR)[i], sep="")), 
+               tau = 6, exclusion_radius = 6, tp = 6))
+  smap.list[[i]] <- sm
+}
+```
+
+
+### Figure S5
+
+```{r}
+par(mar = c(3.3,6,1.4,3.5), mgp = c(2,0.5,0), oma = c(0,0,0,0))
+
+lb <- c("Incidence", "Temperature", "Rainfall", expression(paste("Susceptibles Index (", lambda,")")))
+
+# Plot predictive skill (rho) vs state-dependency parameter (theta)
+for (i in 1:length(PR)) {
+  plot(smap.list[[i]]$theta, smap.list[[i]]$rho, type="l", lwd=3, col="red",
+       axes = FALSE,
+       xlab = "", ylab = "")
+  box(col="black")
+  axis(1, col="black", col.ticks="black", col.axis="black", cex.axis=1, tck = 0.02)
+  mtext(expression(paste("Nonlinearity (",theta,")")), side=1, line=2, col="black", cex=1.2)
+  
+  axis(2, col="black", col.ticks="black", col.axis="black", cex.axis=1, tck = 0.02)
+  mtext(expression(paste("Correlation coefficient (",rho,")")), side=2, line=2, col="black", cex=1.2)
+
+  abline(v = smap.list[[i]]$theta[which.max(smap.list[[i]]$rho)], col="black", lwd=3, lty=2)
+  title(lb[i])
+  
+  file_name = paste("../output/fig_S5/smap_", names(PR[i]), ".pdf", sep="")
+  dev.copy(pdf, file=file_name, width = 5, height = 4)
+  dev.off()
+}
+```
+
+Here, we can save our progress.
+```{r}
+save.image(file="../cache/Figure_S5.RData") 
+```

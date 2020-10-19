@@ -1,0 +1,75 @@
+---
+title: "State Space Reconstruction (Figure S1)"   
+author:  | 
+  | Nicole Nova, Ethan R. Deyle, Marta S. Shocket, Andrew J. MacDonald, Marissa L. Childs, Martin Rypdal, George Sugihara, and Erin A. Mordecai
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+## State Space Reconstruction (Figure S1)
+
+If necessary, we can clear the environment to start with a clean workspace.
+```{r}
+rm(list=ls())
+```
+
+First, we load the data used for attractor reconstruction in the CCM analyses. Here the variables are already normalized and lagged appropriately. 
+```{r}
+load(file="../cache/CCM.RData")
+```
+
+Here, we can load previous results.
+```{r}
+#load(file="../cache/Figure_S1.RData") 
+```
+
+
+### Figure S1
+
+```{r}
+df <- PR %>%
+  rownames_to_column() %>%
+  as_data_frame()
+
+# Plot the three subplots (d), (e), (f) in Figure S1
+scatter3D(df$temp[15:500], df$prec[15:500], df$cases[15:500], phi = 0, bty = "g", type = "l", 
+          colvar = as.numeric(df$rowname[15:500]),
+          col = ramp.col(c("blue", "purple", "red")),
+          clab = c("Time", "(week)"),
+          lwd = 2,
+          xlab = '   Temperature', ylab = 'Rainfall   ', zlab = 'Incidence')
+
+    file_name = paste("../output/fig_S1/ssr_temp_rain_inc.pdf", sep="")
+    dev.copy(pdf, file=file_name, width = 6, height = 5)
+    dev.off()
+
+    
+scatter3D(df$mu[15:500], df$temp[15:500], df$cases[15:500], phi = 0, bty = "g", type = "l", 
+          colvar = as.numeric(df$rowname[15:500]),
+          col = ramp.col(c("blue", "purple", "red")),
+          clab = c("Time", "(week)"),
+          lwd = 2,
+          xlab = '     Susceptibles Index', ylab = 'Temperature      ', zlab = 'Incidence')
+
+    file_name = paste("../output/fig_S1/ssr_index_temp_inc.pdf", sep="")
+    dev.copy(pdf, file=file_name, width = 6, height = 5)
+    dev.off()
+
+
+scatter3D(df$mu[15:500], df$prec[15:500], df$cases[15:500], phi = 0, bty = "g", type = "l", 
+          colvar = as.numeric(df$rowname[15:500]),
+          col = ramp.col(c("blue", "purple", "red")),
+          clab = c("Time", "(week)"),
+          lwd = 2,
+          xlab = '     Susceptibles Index', ylab = 'Rainfall   ', zlab = 'Incidence')
+
+    file_name = paste("../output/fig_S1/ssr_index_rain_inc.pdf", sep="")
+    dev.copy(pdf, file=file_name, width = 6, height = 5)
+    dev.off()
+```
+
+
+Here, we can save our progress.
+```{r}
+save.image(file="../cache/Figure_S1.RData") 
+```

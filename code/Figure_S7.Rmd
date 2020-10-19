@@ -1,0 +1,43 @@
+---
+title: "Convergent Cross-Mapping (Figure S7)"   
+author:  | 
+  | Nicole Nova, Ethan R. Deyle, Marta S. Shocket, Andrew J. MacDonald, Marissa L. Childs, Martin Rypdal, George Sugihara, and Erin A. Mordecai
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+## Convergent Cross-Mapping (Figure S7)
+
+If necessary, we can clear the environment to start with a clean workspace.
+```{r}
+rm(list=ls())
+```
+
+For seasonal distributions, load CCM results performed in file `Figure_3.Rmd`. 
+```{r}
+load(file="../cache/CCM_null_seasonal.RData")
+```
+
+Help functions.
+```{r}
+source("ccm_functions.R")
+```
+
+Here, we can load previous results.
+```{r}
+#load(file="../cache/Figure_S7.RData") 
+```
+
+
+### Figure S7
+
+Plot all subplots.
+```{r}
+plot.ccm.nonsense("fig_S7")
+```
+
+
+Here, we can save our progress.
+```{r}
+save.image(file="../cache/Figure_S7.RData") 
+```

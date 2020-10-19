@@ -1,0 +1,86 @@
+---
+title: "Cross-Correlation Analyses (Figure S6)"   
+author:  | 
+  | Nicole Nova, Ethan R. Deyle, Marta S. Shocket, Andrew J. MacDonald, Marissa L. Childs, Martin Rypdal, George Sugihara, and Erin A. Mordecai
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+## Cross-Correlation Analyses (Figure S6)
+
+If necessary, we can clear the environment to start with a clean workspace.
+```{r}
+rm(list=ls())
+```
+
+Help functions.
+```{r}
+source("data_formatting.R")
+```
+
+Here, we can load previous results.
+```{r}
+#load(file="../cache/Figure_S6.RData") 
+```
+
+
+### Data
+
+We load and process the data and create our main dataframe PR, which stands for "Puerto Rico."
+```{r}
+PR <- data.clean("combined_SanJuan_PuertoRico_1990-2009")
+```
+
+Add lagged and averaged lagged variables.
+```{r}
+PR <- data.process(PR)
+```
+
+Only use the four variables.
+```{r}
+PR <- PR[,3:6]
+```
+
+
+### Cross-Correlation and Figure S6
+
+```{r}
+plot.xcor <- function(driver, mainTitle){
+  
+  par(mar = c(3.5,3.5,1.7,1), mgp = c(2,0.5,0), oma = c(0,0,0,0))
+  
+  # Cross-correlation
+  xcorr_cases_driver <- ccf(PR$cases, na.omit(PR[[driver]]), lag.max = NULL, 
+                            type = c("correlation", "covariance"),
+                            plot = TRUE, main = "", axes = FALSE, xlab = "", ylab = "")
+  box(col="black")
+  axis(1, col="black", col.ticks="black", col.axis="black", cex.axis=1.2, tck = 0.02)
+  mtext("Time lag (week)", side=1, line=2.2, col="black", cex=1.4)
+  
+  axis(2, col="black", col.ticks="black", col.axis="black", cex.axis=1.2, tck = 0.02)
+  mtext(expression(paste("Cross-correlation with incidence (",rho,")")), side=2, line=2, 
+        col="black", cex=1.4)
+  
+  bio_lag <- xcorr_cases_driver$lag[which(xcorr_cases_driver$acf == max(xcorr_cases_driver$acf))]
+  abline(v = bio_lag, col = "red", lwd = 2)
+  title(mainTitle, cex.main=1.4)
+  
+  file_name = paste("../output/fig_S6/", names(PR[driver]), ".pdf", sep="")
+  dev.copy(pdf, file=file_name, width = 5, height = 5)
+  dev.off()
+}
+
+# Temp and Incidence
+plot.xcor("temp", expression(paste("Temperature")))
+
+# Rainfall and Incidence
+plot.xcor("prec", expression(paste("Rainfall")))
+
+# Susceptibles Index and Incidence
+plot.xcor("mu", expression(paste("Susceptibles Index (", lambda,")")))
+```
+
+Here, we can save our progress.
+```{r}
+save.image(file="../cache/Figure_S6.RData") 
+```

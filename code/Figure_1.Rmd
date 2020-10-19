@@ -1,0 +1,93 @@
+---
+title: "Time Series Data (Figure 1)"   
+author:  | 
+  | Nicole Nova, Ethan R. Deyle, Marta S. Shocket, Andrew J. MacDonald, Marissa L. Childs, Martin Rypdal, George Sugihara, and Erin A. Mordecai
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+## Time Series Data (Figure 1)
+
+If necessary, we can clear the environment to start with a clean workspace.
+```{r}
+rm(list=ls())
+```
+
+Help functions.
+```{r}
+source("data_formatting.R")
+```
+
+Here, we can load previous results.
+```{r}
+#load(file="../cache/Figure_1.RData") 
+```
+
+
+### Data
+
+We load and process the data and create our main dataframe PR, which stands for "Puerto Rico."
+```{r}
+PR <- data.clean("combined_SanJuan_PuertoRico_1990-2009")
+```
+
+
+### Figure 1
+
+Next, we will add a date variable that is formatted for whole time series analyses.
+```{r}
+PR$Year <- as.Date(as.character(levels(PR$week_start_date)), 
+                     format = "%m/%d/%Y")[PR$week_start_date]
+```
+ 
+Clean up order of columns.
+```{r}
+# Create an array containing all the variable names 
+vbs <- c("cases", "temp", "prec", "mu")
+
+PR <- PR[, c("Year", "week", vbs)]
+```
+
+We visualize the time series data. 
+```{r echo=T, messages=F, warning=F, results='hide',fig.keep='all', fig.width=8,fig.height=8}
+
+cases_ts <- ggplot(PR, aes(Year, cases)) +
+  geom_line() + 
+  ylim(0,500) +
+  ylab("Incidence") +
+  theme(axis.title.x = element_blank(), axis.text.x = element_blank(), axis.ticks.x=element_blank())
+
+temp_ts <- ggplot(PR, aes(Year, temp)) +
+  geom_line(color='red') +
+  ylim(22,30) +
+  ylab("Temperature (°C)") +
+  theme(axis.title.x = element_blank(), axis.text.x = element_blank(), axis.ticks.x=element_blank())
+
+prec_ts <- ggplot(PR, aes(Year, prec)) +
+  geom_line(color='blue') +
+  ylim(0,300) +
+  ylab("Rainfall (mm)") +
+  theme(axis.title.x = element_blank(), axis.text.x = element_blank(), axis.ticks.x=element_blank())
+  
+mu_ts <- ggplot(PR, aes(Year, mu)) +
+  geom_line(color='purple') +
+  ylim(0.5,1.5) +
+  ylab(expression(paste("Susceptibles Index (", lambda,")"))) +
+  xlab("Year") +
+  theme(axis.title.x = element_text(), axis.text.x = element_text()) 
+  
+grid.newpage()
+g_cases <- ggplotGrob(cases_ts)
+g_temp <- ggplotGrob(temp_ts)
+g_prec <- ggplotGrob(prec_ts)
+g_mu <- ggplotGrob(mu_ts)
+g2 <- rbind(g_cases, g_temp, g_prec, g_mu, size = "last")
+grid.draw(g2)
+
+ggsave("../output/fig_1/Figure_1.pdf", g2, width = 8, height = 8)
+```
+
+Here, we can save our progress.
+```{r}
+save.image(file="../cache/Figure_1.RData") 
+```

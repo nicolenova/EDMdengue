@@ -1,0 +1,81 @@
+---
+title: "Seasonality (Figure 2)"   
+author:  | 
+  | Nicole Nova, Ethan R. Deyle, Marta S. Shocket, Andrew J. MacDonald, Marissa L. Childs, Martin Rypdal, George Sugihara, and Erin A. Mordecai
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+## Seasonality (Figure 2)
+
+If necessary, we can clear the environment to start with a clean workspace.
+```{r}
+rm(list=ls())
+```
+
+Help functions.
+```{r}
+source("data_formatting.R")
+``` 
+
+Here, we can load previous results.
+```{r}
+#load(file="../cache/Figure_2.RData") 
+```
+
+
+### Data
+
+We load and process the data and create our main dataframe PR, which stands for "Puerto Rico."
+```{r}
+PR <- data.clean("combined_SanJuan_PuertoRico_1990-2009")
+```
+
+Add lagged and averaged lagged variables.
+```{r}
+PR <- data.process(PR)
+```
+
+Add seasonal variables.
+```{r}
+PR.season <- data.season(PR)
+```
+
+
+### Figure 2
+
+Plot the seasonal trends for all variables.
+```{r}
+par(mar = c(3.3,6,1,3.5), mgp = c(2.2,1,0), oma = c(0,0,0,0))
+plot(PR.season$cases.season.log ~ PR.season$week, 
+     xlab = "Week of the Year",
+     ylab = "",
+     type = "l", lwd = 3, ylim = c(0.8,2))
+mtext(side = 2, text = "Log Dengue Incidence", line = 4.7)
+mtext(side = 2, text = "Log Rainfall (mm)", line = 3.4)
+mtext(side = 2, text = expression(paste("Susceptibles Index (",lambda,")")), line = 2)
+
+lines(PR.season$prec.season.log.avglag_3.all ~ PR.season$week, col="blue", type = "l", lwd = 3)
+lines(PR.season$mu.season.lag_5.all ~ PR.season$week, col="purple", type = "l", lwd = 3)
+
+par(new = T)
+plot(PR.season$temp.season.lag_9.all ~ PR.season$week, 
+     type = "l", lwd = 3, lty = 1, axes = F, xlab = NA, ylab = NA, col="red", ylim = c(22,30))
+axis(side = 4)
+mtext(side = 4, line = 2, "Temperature (°C)")
+
+legend("topleft",
+       legend=c("Incidence         ", "Temperature (9 week lag)         ", 
+                "Precipitation (3-9 week lag)          ", 
+       "Susceptibles (5 week lag)          "),
+       lty=c(1,1,1,1), lwd=3, pch=c(NA, NA, NA, NA), col=c("black", "red", "blue", "purple"), bty = "n", 
+       inset = 0.02, cex = 0.9, y.intersp=1.2)
+
+dev.copy(pdf, "../output/fig_2/Figure_2.pdf", width = 6, height = 4)
+dev.off()
+```
+
+Here, we can save our progress.
+```{r}
+save.image(file="../cache/Figure_2.RData") 
+```

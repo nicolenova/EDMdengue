@@ -1,0 +1,224 @@
+---
+title: "Forecasting (Figure 4)"   
+author:  | 
+  | Nicole Nova, Ethan R. Deyle, Marta S. Shocket, Andrew J. MacDonald, Marissa L. Childs, Martin Rypdal, George Sugihara, and Erin A. Mordecai
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+## Forecasting (Figure 4)
+
+If necessary, we can clear the environment to start with a clean workspace.
+```{r}
+rm(list=ls())
+```
+
+Help functions and packages.
+```{r}
+library("fGarch")
+library("fitdistrplus")
+
+source("data_formatting.R")
+source("forecast_functions.R")
+```
+
+Here, we can load previous results.
+```{r}
+#load(file="../cache/Figure_4_train.RData") 
+#load(file="../cache/Figure_4_test.RData") 
+```
+
+
+### State-Space Reconstructed Forecasting Models 
+
+Performing SSR and forecasting using simplex projection.
+```{r}
+# Forecasting parameters for all models
+forecast.horizon <- 8     # Minimum forecast horizon
+```
+
+```{r}
+# The time series to be used for the SSR for each model
+ts.dim.cases <- c("cases", "cases.lag_1", "cases.lag_2", "cases.lag_3", 
+                  "cases.lag_4", "cases.lag_5", "cases.lag_6", "cases.lag_7")
+
+ts.dim.drivers <- c("mu.lag_5", "mu.lag_6", "mu.lag_4",
+                    "temp.lag_9", "temp.lag_10", 
+                    "prec.avglag_3", "prec.avglag_4", "prec.avglag_2")
+
+ts.dim.cases.drivers <- c("cases", "cases.lag_1", "cases.lag_2", "cases.lag_3", "cases.lag_4",
+                          "mu.lag_5", "temp.lag_9", "prec.avglag_3") 
+
+ts.dim.climate <- c("temp.lag_9", "temp.lag_10", "temp.lag_8", "temp.lag_11",
+                    "prec.avglag_3", "prec.avglag_4", "prec.avglag_2", "prec.avglag_5")
+```
+
+
+### Training Data
+
+We load and process the data and create our main dataframe PR, which stands for "Puerto Rico."
+```{r}
+PR <- data.clean("combined_SanJuan_PuertoRico_1990-2009")
+```
+
+Add lagged and averaged lagged variables.
+```{r}
+PR <- data.process(PR)
+```
+
+Normalize the variables before performing EDM analyses.
+```{r}
+# Normalize the whole dataset
+PR.norm <- scale(PR[,c(-1,-2)], center = TRUE, scale = TRUE)
+
+# Convert back to dataframe
+PR.norm <- as.data.frame(PR.norm)
+
+# Add the date back
+PR.norm <- cbind(PR[1], PR[2], PR.norm)
+
+# Renaming PR to PR.norm since that's what we'll be using in the next EDM analyses
+PR.orig <- PR
+PR <- PR.norm
+```
+
+
+### Figure 4 (1990/1991-2008/2009)
+
+Run forecasting algorithm using the `forecast.train` function, indicating that we are using the 1990/1991-2009/2010 data set which will be used as a training data set.
+```{r}
+#forecast.train(df, ts.dim, forecast.horizon)
+cases <- forecast.train(PR, ts.dim.cases, forecast.horizon)
+drivers <- forecast.train(PR, ts.dim.drivers, forecast.horizon)
+cases.drivers <- forecast.train(PR, ts.dim.cases.drivers, forecast.horizon)
+climate <- forecast.train(PR, ts.dim.climate, forecast.horizon)
+```
+
+```{r}
+plot.forecast(cases, "cases", 
+              expression(paste("SSR: Incidence")), 
+              "train", "2007-11-11")
+
+plot.forecast(drivers, "drivers", 
+              expression(paste("SSR: Temperature + Rainfall + ", lambda,"")), 
+              "train", "2007-11-11")
+
+plot.forecast(cases.drivers, "cases.drivers", 
+              expression(paste("SSR: Incidence + Temperature + Rainfall + ", lambda,"")), 
+              "train", "2007-11-11")
+
+plot.forecast(climate, "climate", 
+              expression(paste("SSR: Temperature + Rainfall")), 
+              "train", "2007-11-11")
+```
+
+Obtain prediction skill and RMSE.
+```{r}
+model <- cases
+model <- drivers
+model <- cases.drivers
+model <- climate
+
+c <- cor.test(model$obs, model$mean.pred)
+rhoval <- round(c$estimate, digits = 4)
+pval <- round(c$p.value, digits = 10)
+
+rmse(model$obs, na.omit(model$mean.pred))
+```
+
+Here, we can save our progress.
+```{r}
+save.image(file="../cache/Figure_4_train.RData") 
+```
+
+
+### Testing Data
+
+We load and process the data and create our main dataframe PR, which stands for "Puerto Rico."
+```{r}
+PR <- data.clean("combined_SanJuan_PuertoRico_1990-2013")
+```
+
+Add lagged and averaged lagged variables.
+```{r}
+PR <- data.process(PR)
+```
+
+Normalize the variables before performing EDM analyses.
+```{r}
+# Normalize the whole dataset
+PR.norm <- scale(PR[,c(-1,-2)], center = TRUE, scale = TRUE)
+
+# Convert back to dataframe
+PR.norm <- as.data.frame(PR.norm)
+
+# Add the date back
+PR.norm <- cbind(PR[1], PR[2], PR.norm)
+
+# Renaming PR to PR.norm since that's what we'll be using in the next EDM analyses
+PR.orig <- PR
+PR <- PR.norm
+```
+
+
+### Figure 4 (2009/2010-2012/2013)
+
+Define various starting points for simplexes constructed and forecasted using previous training data.
+```{r}
+# Previous simplexes to be used in forecasting from the 19-year training data
+previous.simplexes <- c(seq(forecast.horizon, 26), seq(52*2-13-26, 52*2-13), seq(52*3-13-26, 52*3-13),
+                        seq(52*4-13-26, 52*4-13), seq(52*5-13-26, 52*5-13), seq(52*6-13-26, 52*6-13), 
+                        seq(52*7-13-26, 52*7-13), seq(52*8-13-26, 52*8-13), seq(52*9-13-26, 52*9-13),
+                        seq(52*10-13-26, 52*10-13), seq(52*11-13-26, 52*11-13), 
+                        seq(52*12-13-26, 52*12-13), seq(52*13-13-26, 52*13-13), 
+                        seq(52*14-13-26, 52*14-13), seq(52*15-13-26, 52*15-13),
+                        seq(52*16-13-26, 52*16-13), seq(52*17-13-26, 52*17-13),
+                        seq(52*18-13-26, 52*18-13), seq(52*19-13-26, 52*19-13))
+```
+
+Run forecasting algorithm. Update the attractor (model) with new data sequentially when forecasting using the `forecast.test` function.
+```{r}
+#forecast.test(df, ts.dim, forecast.horizon)
+cases <- forecast.test(PR, ts.dim.cases, forecast.horizon, previous.simplexes)
+drivers <- forecast.test(PR, ts.dim.drivers, forecast.horizon, previous.simplexes)
+cases.drivers <- forecast.test(PR, ts.dim.cases.drivers, forecast.horizon, previous.simplexes)
+climate <- forecast.test(PR, ts.dim.climate, forecast.horizon, previous.simplexes)
+```
+
+Plotting forecasts for test seasons.
+```{r}
+plot.forecast(cases, "cases", 
+              expression(paste("SSR: Incidence")), 
+              "test", "2012-11-11")
+
+plot.forecast(drivers, "drivers", 
+              expression(paste("SSR: Temperature + Rainfall + ", lambda,"")), 
+              "test", "2012-11-11")
+
+plot.forecast(cases.drivers, "cases.drivers", 
+              expression(paste("SSR: Incidence + Temperature + Rainfall + ", lambda,"")), 
+              "test", "2012-11-11")
+
+plot.forecast(climate, "climate", 
+              expression(paste("SSR: Temperature + Rainfall")), 
+              "test", "2012-11-11")
+```
+
+Obtain prediction skill and RMSE.
+```{r}
+model <- cases
+model <- drivers
+model <- cases.drivers
+model <- climate
+
+c <- cor.test(model$obs, model$mean.pred)
+rhoval <- round(c$estimate, digits = 4)
+pval <- round(c$p.value, digits = 10)
+
+rmse(model$obs, na.omit(model$mean.pred))
+```
+
+Here, we can save our progress.
+```{r}
+save.image(file="../cache/Figure_4_test.RData") 
+```

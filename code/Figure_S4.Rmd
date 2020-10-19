@@ -1,0 +1,180 @@
+---
+title: "Deterministic Dynamics (Figure S4)"   
+author:  | 
+  | Nicole Nova, Ethan R. Deyle, Marta S. Shocket, Andrew J. MacDonald, Marissa L. Childs, Martin Rypdal, George Sugihara, and Erin A. Mordecai
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+## Deterministic Dynamics (Figure S4)
+
+If necessary, we can clear the environment to start with a clean workspace.
+```{r}
+rm(list=ls())
+```
+
+Here, we can load previous results.
+```{r}
+#load(file="../cache/Figure_S4.RData") 
+```
+
+
+### Data
+
+```{r Load data}
+# We load the data and create our main dataframe PR, which stands for "Puerto Rico."
+PR <- read.csv("../data/combined_SanJuan_PuertoRico_1990-2009.csv", header=T) %>%
+  rename(temp = tavg) %>%
+  mutate(time = as.Date(as.character(levels(week_start_date)), 
+                     format = "%m/%d/%Y")[week_start_date]) %>%
+  select(time, -season, -season_week, -week_start_date, -year, everything())
+
+# Per other analyses, we remove an anomolous precipitation measurement
+prec_max_value <- which.max(PR$prec) # Find the extreme outlier value
+PR$prec[prec_max_value] <- 0 # Remove it
+PR$prec[prec_max_value] <- max(PR$prec) # Replace it with the next highest value
+```
+
+
+### State Space Reconstruction
+
+```{r EDM parameters}
+# Parameters for attractor reconstruction
+tau <- 7
+E.max <- 10
+excl_radius_weeks <- 26
+```
+
+Univariate SSR for incidence to investigate whether there are deterministic dynamics (whether the system is forecastable using an attractor-based method beyond the skill of an autoregressive model). 
+```{r}
+out.simplex <- simplex((PR$cases), tau = tau, E = 1:E.max, tp = 1:75, exclusion_radius = excl_radius_weeks)
+
+out.simplex.maxes <- out.simplex %>%
+  group_by(tp) %>%
+  top_n(1, rho)
+
+ggplot(out.simplex.maxes, aes(x = tp)) + 
+  geom_line(aes(y = rho, color = "simplex")) + 
+  geom_line(aes(y = const_pred_rho, color="AR(1)")) +
+  theme_bw()
+
+ggplot(out.simplex.maxes, aes(x = tp)) + 
+  geom_line(aes(y = mae, color = "simplex")) + 
+  geom_line(aes(y = const_pred_mae, color="AR(1)")) +
+  scale_y_reverse() +
+  theme_bw()
+```
+
+Univariate SSR with AR and seasonal-AR to compare forecasting performance to evaluate deterministic dynamics for all variables.
+```{r}
+# Parameters
+plot_vars <- c("cases", "temp", "prec", "mu")
+T_season <- 52
+tp_max <- 52*1.25
+
+i_start <- max(c(T_season, tau*E.max))
+i_end <- NROW(PR) - tp_max
+
+# Create forecasting models
+DET.DYN <- map_df(plot_vars, 
+                         function(var_i){
+                           
+                           print(var_i)
+                           y_i <- pull(PR, var_i)
+                           
+                           PREDS <- map(i_start:i_end, function(i_i){
+                             
+                             y_fit <- y_i %>% replace(i_i, NA)
+                             y_fore <- y_i[1:i_i]
+                             f_sAR1 <- Arima(y_fit, order=c(1,0,0), 
+                                             seasonal = list(order = c(1,0,0), period = T_season), 
+                                             method = "CSS")
+                             f_sAR0 <- Arima(y_fit, order = c(0,0,0), 
+                                             seasonal = list(order = c(1,0,0), period = T_season), 
+                                             method = "CSS")
+                             f_AR1 <- Arima(y_fit, order = c(1,0,0), method="CSS")
+                             
+                             y_sAR1 <- Arima(y_fore, model = f_sAR1) %>% forecast(h = tp_max) %>% `[[`('mean')
+                             y_sAR0 <- Arima(y_fore, model = f_sAR0) %>% forecast(h = tp_max) %>% `[[`('mean')
+                             y_AR1 <- Arima(y_fore, model = f_AR1) %>% forecast(h = tp_max) %>% `[[`('mean')
+                             
+                             return(list(sAR1 = as.numeric(y_sAR1), 
+                                         sAR0 = as.numeric(y_sAR0), 
+                                         AR1 = as.numeric(y_AR1)))
+                           }) # map(i_i)
+                           
+                           preds <- map(purrr::transpose(PREDS),~do.call(rbind,.))
+                           
+                           out_sAR1 <- map_df(1:ncol(preds$sAR1), function(i_col){
+                             compute_stats(lead(y_i, i_col)[i_start:i_end], preds$sAR1[, i_col])
+                           }) %>% mutate(method = "sAR1", target = var_i, tp = row_number()) %>% 
+                             select(method, num_pred, target, tp, rho, mae, rmse)
+                           
+                           out_sAR0 <- map_df(1:ncol(preds$sAR0), function(i_col){
+                             compute_stats(lead(y_i, i_col)[i_start:i_end], preds$sAR0[, i_col])
+                           }) %>% mutate(method = "sAR0", target = var_i, tp = row_number()) %>%
+                             select(method, num_pred, target, tp, rho, mae, rmse)
+                           
+                           out_AR1 <- map_df(1:ncol(preds$AR1), function(i_col){
+                             compute_stats(lead(y_i, i_col)[i_start:i_end], preds$AR1[, i_col])
+                           }) %>% mutate(method = "AR1", target = var_i, tp = row_number()) %>% 
+                             select(method, num_pred, target, tp, rho, mae, rmse)
+                           
+                           out_simplex <- simplex(y_i, tau = tau, E = 1:E.max, tp = 1:tp_max, 
+                                                  exclusion_radius = excl_radius_weeks) %>%
+                             group_by(tp) %>%
+                             top_n(1, rho) %>%
+                             mutate(method = "simplex", target = var_i) %>% 
+                             select(method, num_pred, target, tp, rho, mae, rmse)
+                           
+                           bind_rows(
+                             out_sAR1,
+                             out_sAR0,
+                             out_AR1,
+                             out_simplex)
+                           
+                           }) # map(var_i)
+```
+
+
+### Figure S4
+
+```{r Figure S4}
+dict_targets <- list(
+  cases = "Incidence",
+  mu = "Susceptibles Index (\u03BB)",
+  prec = "Rainfall",
+  temp = "Temperature"
+)
+
+dict_method <- list(
+  simplex = "Simplex projection",
+  AR1 = "AR(1)",
+  sAR0 = "Seasonal AR",
+  sAR1 = "AR(1) + Seasonal AR"
+)
+
+DET.DYN %>% 
+  mutate(target = factor(target, levels = names(dict_targets), labels = dict_targets)) %>%
+  mutate(method = factor(method, levels = names(dict_method), labels = dict_method)) %>%
+  ggplot(aes(x = tp, y = rho)) + 
+  geom_line(aes(color = method), size = 0.8) + 
+  geom_hline(aes(yintercept = 0), lty = 2) +
+  xlim(0, 52) + 
+  # ylim(0, 1) + 
+  labs(x = "Time to prediction (week)", 
+       y = expression(paste("Correlation coefficient (", rho, ")", sep="")), 
+       color = NULL) +
+  facet_wrap(~target) + 
+  theme_bw() + 
+  theme(legend.position = "bottom") +
+  scale_color_manual(values=c("#d19a19", "#00BA38", "#007cc4", "#00BFC4")) +
+  guides(col=guide_legend(nrow = 2, byrow=TRUE)) -> g
+
+ggsave("../output/fig_S4/Figure_S4.pdf", g, device = cairo_pdf, width = 4.5, height = 5.5)
+```
+
+Here, we can save our progress.
+```{r}
+save.image(file="../cache/Figure_S4.RData") 
+```

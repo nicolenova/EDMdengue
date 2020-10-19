@@ -1,0 +1,111 @@
+---
+title: "Optimal Embedding Dimension (Figure S3)"   
+author:  | 
+  | Nicole Nova, Ethan R. Deyle, Marta S. Shocket, Andrew J. MacDonald, Marissa L. Childs, Martin Rypdal, George Sugihara, and Erin A. Mordecai
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+## Optimal Embedding Dimension (Figure S3)
+
+If necessary, we can clear the environment to start with a clean workspace.
+```{r}
+rm(list=ls())
+```
+
+Help functions.
+```{r}
+source("data_formatting.R")
+```
+
+Here, we can load previous results.
+```{r}
+#load(file="../cache/Figure_S3.RData") 
+```
+
+
+### Data
+
+We load and process the data and create our main dataframe PR, which stands for "Puerto Rico."
+```{r}
+PR <- data.clean("combined_SanJuan_PuertoRico_1990-2009")
+```
+
+Add lagged and averaged lagged variables.
+```{r}
+PR <- data.process(PR)
+```
+
+Normalize the variables before performing EDM analyses.
+```{r}
+# Normalize the whole dataset
+PR.norm <- scale(PR[,c(-1,-2)], center = TRUE, scale = TRUE)
+
+# Convert back to dataframe
+PR.norm <- as.data.frame(PR.norm)
+
+# Add the date back
+PR.norm <- cbind(PR[1], PR[2], PR.norm)
+
+# Renaming PR to PR.norm since that's what we'll be using in the next EDM analyses
+PR.orig <- PR
+PR <- PR.norm
+```
+
+Only use the four variables.
+```{r}
+PR <- PR[,3:6]
+```
+
+
+### Simplex projection
+
+We will use simplex projection to determine the dimensionality of the variables and if the variables are predictable (i.e., if governed by determinisitc processes). 
+```{r}
+lb <- c("Incidence", "Temperature", "Rainfall", expression(paste("Susceptibles Index (", lambda,")")))
+
+# Simplex projection
+sim.list <- list()
+for (i in 1:4) {
+  sim <- simplex(PR[[i]], E = 2:12, tau = 7, exclusion_radius = 6, tp = 6)
+  sim.list[[i]] <- sim
+}
+```
+
+
+### Figure S3
+
+```{r}
+em <- c(8,8,6,5) # For adding the vertical dashed lines showing the chosen optimal E after plotting
+
+# Plot predictive skill (rho) vs embedding dimension (E)
+par(mar = c(3.3,6,1.4,3.5), mgp = c(2,0.5,0), oma = c(0,0,0,0))
+for (i in 1:4) {
+  plot(sim.list[[i]]$E, sim.list[[i]]$rho, plot.main=NULL, type="l",  lwd=3, col="blue",
+       axes = FALSE,
+       xlab = "", ylab = "")
+  box(col="black")
+  axis(1, col="black", col.ticks="black", col.axis="black", cex.axis=1, tck = 0.02)
+  mtext("Embedding dimension (E)", side=1, line=2, col="black", cex=1.2)
+  
+  axis(2, col="blue", col.ticks="blue", col.axis="blue", cex.axis=1, tck = 0.02)
+  mtext(expression(paste("Correlation coefficient (",rho,")")), side=2, line=2, col="blue", cex=1.2)
+
+  par(new = T)
+  plot(sim.list[[i]]$E, sim.list[[i]]$mae, type="l", lwd=3, col="red", axes = F, xlab = NA, ylab = NA)
+  axis(side = 4, col="red", col.ticks="red", col.axis="red", cex.axis=1, tck = 0.02)
+  mtext(side = 4, line = 2, "Mean Absolute Error", col = "red", cex=1.2)
+  
+  abline(v = em[i], col="black", lwd=3, lty=2)
+  title(lb[i])
+  
+  file_name = paste("../output/fig_S3/sim_", names(PR[i]), ".pdf", sep="")
+  dev.copy(pdf, file=file_name, width = 5, height = 4)
+  dev.off()
+}
+```
+
+Here, we can save our progress.
+```{r}
+save.image(file="../cache/Figure_S3.RData") 
+```

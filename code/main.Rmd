@@ -1,0 +1,82 @@
+---
+title: "Susceptible host availability modulates climate effects on dengue dynamics"
+author:  | 
+  | Nicole Nova, Ethan R. Deyle, Marta S. Shocket, Andrew J. MacDonald, Marissa L. Childs, Martin Rypdal, George Sugihara, and Erin A. Mordecai
+header-includes:
+   - \usepackage{float}
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    toc: yes
+    toc_depth: 2
+#bibliography: ref.bib
+---
+
+\floatplacement{figure}{H}
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      cache = TRUE,
+                      fig.width = 6,
+                      fig.height = 4,
+                      message = FALSE,
+                      warning = FALSE)
+```
+
+### Set up  
+
+If necessary, we can clear the environment to start with a clean workspace.
+```{r}
+rm(list=ls())
+```
+
+Load packages. If necessary, install the following packages from [CRAN](https://cran.r-project.org/). Once installed, we can load the packages using `lapply`.
+```{r packages, warning=FALSE, message=FALSE}
+needed_packages = c("plyr", "dplyr", "ggplot2", "grid", "gridExtra", "stringr", "purrr", "png", "rgl", "parallel", "cowplot", "scales", "plotrix", "rEDM", "Kendall", "forecast", "tseries", "grDevices", "plot3D", "scales", "rgl", "deSolve", "tidyr", "data.table", "Metrics", "tidyverse", "egg", "rowr")
+
+lapply(needed_packages, require, character.only = TRUE)
+
+new.packages <- needed_packages[!(needed_packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+```
+
+```{r child = 'Figure_1.Rmd'}
+```
+
+```{r child = 'Figure_2.Rmd'}
+```
+
+```{r child = 'Figure_3.Rmd'}
+```
+
+```{r child = 'Figure_4.Rmd'}
+```
+
+```{r child = 'Figures_5_and_6.Rmd'}
+```
+
+```{r child = 'Figure_S1.Rmd'}
+```
+
+```{r child = 'Figure_S3.Rmd'}
+```
+
+```{r child = 'Figure_S4.Rmd'}
+```
+
+```{r child = 'Figure_S5.Rmd'}
+```
+
+```{r child = 'Figure_S7.Rmd'}
+```
+
+```{r child = 'Figure_S8.Rmd'}
+```
+
+```{r child = 'Table_S1_Figures_S9_S11.Rmd'}
+```
+
+```{r child = 'Table_S2_Figures_S10_S12.Rmd'}
+```
+
+

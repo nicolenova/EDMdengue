@@ -1,0 +1,245 @@
+---
+title: "Dengue Forecasting Challenge: Training (Table S2 and Figures S10 and S12)"   
+author:  | 
+  | Nicole Nova, Ethan R. Deyle, Marta S. Shocket, Andrew J. MacDonald, Marissa L. Childs, Martin Rypdal, George Sugihara, and Erin A. Mordecai
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+## Dengue Forecasting Challenge: Training (Table S2 and Figures S10 and S12)
+
+If necessary, we can clear the environment to start with a clean workspace.
+```{r}
+rm(list=ls())
+```
+
+Help functions and packages.
+```{r}
+library("fGarch")
+library("fitdistrplus")
+
+source("data_formatting.R")
+source("forecast_challenge_functions.R")
+```
+
+Here, we can load previous results.
+```{r}
+#load(file="../cache/Table_S2_and_Figures_S10_S12.RData") 
+```
+
+
+### State-Space Reconstructed Forecasting Model
+
+```{r}
+# The best SSR model embedding
+ts.dim.cases.drivers <- c("cases", "cases.lag_1", "cases.lag_2", "cases.lag_3", "cases.lag_4",
+                          "mu.lag_5", "temp.lag_9", "prec.avglag_3")
+```
+
+
+### Training Data
+
+We load and process the data and create our main dataframe PR, which stands for "Puerto Rico."
+```{r}
+PR <- data.clean("combined_SanJuan_PuertoRico_1990-2009")
+```
+
+Add lagged and averaged lagged variables.
+```{r}
+PR <- data.process(PR)
+```
+
+Normalize the variables before performing EDM analyses.
+```{r}
+# Normalize the whole dataset
+PR.norm <- scale(PR[,c(-1,-2)], center = TRUE, scale = TRUE)
+
+# Convert back to dataframe
+PR.norm <- as.data.frame(PR.norm)
+
+# Add the date back
+PR.norm <- cbind(PR[1], PR[2], PR.norm)
+
+# Renaming PR to PR.norm since that's what we'll be using in the next EDM analyses
+PR.orig <- PR
+PR <- PR.norm
+```
+
+Forecasting targets:
+1. Peak week (bin by week)
+2. Peak incidence (bin by 50 and over 500)
+3. Total cases (bin by 1000 and over 10,000)
+
+First we obtain the observed cases for each testing season (2005/2006-2008/2009).
+```{r}
+obs.s <- PR$cases*sd(PR.orig$cases) + mean(PR.orig$cases)
+start.season1 <- 52*15 + 1
+start.season2 <- 52*16 + 1
+start.season3 <- 52*17 + 1
+start.season4 <- 52*18 + 1
+obs.s1 <- obs.s[start.season1:(start.season2-1)]
+obs.s2 <- obs.s[start.season2:(start.season3-1)]
+obs.s3 <- obs.s[start.season3:(start.season4-1)]
+obs.s4 <- obs.s[start.season4:length(obs.s)]
+```
+
+
+### Table S2 (2005/2006-2008/2009)
+
+
+#### Peak week
+
+Week of max incidence obtained for each 1-7 forecast:
+```{r}
+forecast.seasons.peak.wk <- forecast.test(PR, 780, ts.dim.cases.drivers, 1)
+```
+
+```{r}
+max.wk.s1 <- which.max(obs.s1) # 19
+max.wk.s2 <- which.max(obs.s2) # 22
+max.wk.s3 <- which.max(obs.s3) # 23
+max.wk.s4 <- which.max(obs.s4) # 31
+```
+
+Now we will calculate the scores.
+```{r}
+wk.score.1 <- calc.score.peak.wk(forecast.seasons.peak.wk, 1, obs.s1)
+# -2.226599
+wk.score.2 <- calc.score.peak.wk(forecast.seasons.peak.wk, 2, obs.s2)
+# -3.131046
+wk.score.3 <- calc.score.peak.wk(forecast.seasons.peak.wk, 3, obs.s3)
+# -2.410293
+wk.score.4 <- calc.score.peak.wk(forecast.seasons.peak.wk, 4, obs.s4) 
+# -3.149946
+```
+
+Total score for peak weak:
+```{r}
+score.peak.wk <- mean(c(wk.score.1, wk.score.2, wk.score.3, wk.score.4))
+score.peak.wk
+# -2.729471
+``` 
+Table S2: -2.73
+
+
+#### Peak incidence
+
+Max incidence obtained for each 1-7 forecast:
+```{r}
+forecast.seasons.peak.inc <- forecast.test(PR, 780, ts.dim.cases.drivers, 2)
+```
+
+```{r}
+max.inc.s1 <- max(obs.s1) # Bin 100-150
+max.inc.s2 <- max(obs.s2) # Bin 0-50
+max.inc.s3 <- max(obs.s3) # Bin 150-200
+max.inc.s4 <- max(obs.s4) # Bin 0-50
+```
+
+```{r}
+inc.score.1 <- calc.score.peak.tot.inc(forecast.seasons.peak.inc, 1, max(obs.s1), 100, 150, 500)
+# -0.9856454
+inc.score.2 <- calc.score.peak.tot.inc(forecast.seasons.peak.inc, 2, max(obs.s2), 0, 50, 500)
+# -0.8218024
+inc.score.3 <- calc.score.peak.tot.inc(forecast.seasons.peak.inc, 3, max(obs.s3), 150, 200, 500)
+# -2.222755
+inc.score.4 <- calc.score.peak.tot.inc(forecast.seasons.peak.inc, 4, max(obs.s4), 0, 50, 500) 
+# -0.5298068
+```
+
+Total score for peak incidence:
+```{r} 
+peak.inc.score <- mean(c(inc.score.1, inc.score.2, inc.score.3, inc.score.4)) 
+peak.inc.score 
+# -1.140002
+``` 
+Table S2: -1.14
+
+
+#### Seasonal incidence
+
+Total incidence obtained for each 1-7 forecast:
+```{r}
+forecast.seasons.tot.inc <- forecast.test(PR, 780, ts.dim.cases.drivers, 3)
+```
+
+```{r}
+tot.inc.s1 <- sum(obs.s1) # Bin 1000-2000
+tot.inc.s2 <- sum(obs.s2) # Bin 0000-1000
+tot.inc.s3 <- sum(obs.s3) # Bin 1000-2000
+tot.inc.s4 <- sum(obs.s4) # Bin 1000-2000
+```
+
+```{r}
+tot.inc.score.1 <- calc.score.peak.tot.inc(forecast.seasons.tot.inc, 1, sum(obs.s1), 1000, 2000, 10000)
+# -0.4181516
+tot.inc.score.2 <- calc.score.peak.tot.inc(forecast.seasons.tot.inc, 2, sum(obs.s2), 0000, 1000, 10000)
+# -0.5626004
+tot.inc.score.3 <- calc.score.peak.tot.inc(forecast.seasons.tot.inc, 3, sum(obs.s3), 1000, 2000, 10000)
+# -0.4173044
+tot.inc.score.4 <- calc.score.peak.tot.inc(forecast.seasons.tot.inc, 4, sum(obs.s4), 1000, 2000, 10000)
+# -1.227054
+```
+
+```{r}
+tot.inc.score <- mean(c(tot.inc.score.1, tot.inc.score.2, tot.inc.score.3, tot.inc.score.4))
+tot.inc.score
+# -0.6562777
+```
+Table S2: -0.66
+
+
+Table S2:
+```{r}
+peak.inc.score
+score.peak.wk
+tot.inc.score
+```
+
+
+### Figure S10
+
+```{r}
+#boxplot.target(forecast.seasons, seasonNumber, obs.sx, fig, target)
+
+# Peak week
+boxplot.target(forecast.seasons.peak.wk, 1, obs.s1, "fig_S10", 1)
+boxplot.target(forecast.seasons.peak.wk, 2, obs.s2, "fig_S10", 1)
+boxplot.target(forecast.seasons.peak.wk, 3, obs.s3, "fig_S10", 1)
+boxplot.target(forecast.seasons.peak.wk, 4, obs.s4, "fig_S10", 1)
+
+# Peak incidence
+boxplot.target(forecast.seasons.peak.inc, 1, obs.s1, "fig_S10", 2)
+boxplot.target(forecast.seasons.peak.inc, 2, obs.s2, "fig_S10", 2)
+boxplot.target(forecast.seasons.peak.inc, 3, obs.s3, "fig_S10", 2)
+boxplot.target(forecast.seasons.peak.inc, 4, obs.s4, "fig_S10", 2)
+
+# Seasonal incidence
+boxplot.target(forecast.seasons.tot.inc, 1, obs.s1, "fig_S10", 3)
+boxplot.target(forecast.seasons.tot.inc, 2, obs.s2, "fig_S10", 3)
+boxplot.target(forecast.seasons.tot.inc, 3, obs.s3, "fig_S10", 3)
+boxplot.target(forecast.seasons.tot.inc, 4, obs.s4, "fig_S10", 3)
+```
+
+
+
+### Figure S12
+
+Get the forecasts.
+```{r}
+forecast.seasons <- forecast.test(PR, 780, ts.dim.cases.drivers, 0)
+```
+
+Plot the forecasts for all seasons.
+```{r message=F, warning=F}
+#plot.forecasts(forecast.seasons, seasonNumber, obs.sx, maxInc, fig)
+plot.forecasts(forecast.seasons, 1, obs.s1, 300, "fig_S12")
+plot.forecasts(forecast.seasons, 2, obs.s2, 300, "fig_S12")
+plot.forecasts(forecast.seasons, 3, obs.s3, 300, "fig_S12")
+plot.forecasts(forecast.seasons, 4, obs.s4, 300, "fig_S12")
+```
+
+Here, we can save our progress.
+```{r}
+save.image(file="../cache/Table_S2_and_Figures_S10_S12.RData") 
+```
